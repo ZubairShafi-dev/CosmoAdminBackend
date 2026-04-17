@@ -27,6 +27,10 @@ const productSchema = new mongoose.Schema(
       required: [true, 'Price is required'],
       min: 0,
     },
+    originalPrice: { 
+      type: Number, 
+      default: null 
+    },
     currency: { type: String, default: 'USD' },
 
     // For signals: the minimum subscription amount to unlock L2-L5

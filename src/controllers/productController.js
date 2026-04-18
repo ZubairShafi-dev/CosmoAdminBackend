@@ -1,4 +1,5 @@
 const Product = require('../models/Product');
+const AuditLog = require('../models/AuditLog');
 
 // ─── GET /api/products ────────────────────────────────────────
 exports.getAllProducts = async (req, res) => {
@@ -30,6 +31,14 @@ exports.getProduct = async (req, res) => {
 exports.createProduct = async (req, res) => {
   try {
     const product = await Product.create(req.body);
+    
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: 'CREATE_PRODUCT',
+      details: `Created new ${product.category}: ${product.name}`,
+      metadata: { productId: product._id }
+    });
+
     res.status(201).json({ success: true, data: product });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
@@ -44,6 +53,14 @@ exports.updateProduct = async (req, res) => {
       runValidators: true,
     });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: 'UPDATE_PRODUCT',
+      details: `Updated ${product.category}: ${product.name}`,
+      metadata: { productId: product._id }
+    });
+
     res.json({ success: true, data: product });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
@@ -55,6 +72,14 @@ exports.deleteProduct = async (req, res) => {
   try {
     const product = await Product.findByIdAndDelete(req.params.id);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: 'DELETE_PRODUCT',
+      details: `Deleted ${product.category}: ${product.name}`,
+      metadata: { productId: product._id }
+    });
+
     res.json({ success: true, message: 'Product removed' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

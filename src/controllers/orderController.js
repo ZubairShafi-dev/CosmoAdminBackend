@@ -1,5 +1,6 @@
 const Order = require('../models/Order');
 const Product = require('../models/Product');
+const AuditLog = require('../models/AuditLog');
 const User = require('../models/User');
 const { distributeCommissions, updateBuyerEligibilityFlags } = require('../services/AffiliateService');
 const { startSalesBonusForOrder } = require('../services/SalesBonusService');
@@ -109,6 +110,14 @@ exports.updateOrderStatus = async (req, res) => {
     if (notes !== undefined) order.notes = notes;
 
     await order.save();
+
+    await AuditLog.create({
+      adminId: req.user._id,
+      action: 'UPDATE_ORDER_STATUS',
+      details: `Changed order status to ${order.status}`,
+      metadata: { orderId: order._id, newStatus: order.status }
+    });
+
     res.json({ success: true, message: 'Order status updated', data: order });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

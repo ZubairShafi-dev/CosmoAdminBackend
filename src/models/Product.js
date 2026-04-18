@@ -3,10 +3,12 @@ const mongoose = require('mongoose');
 // Commission rate table per category per level
 // Structure: { category: [L1%, L2%, L3%, L4%, L5%] }
 const COMMISSION_RATES = {
-  course:   [30, 7, 3, 3, 2],
-  social:   [14, 1, 1, 1, 1],
-  signal:   [35, 5, 3, 1, 1],
-  bot:      [25, 2, 1, 1, 1],
+  course:     [30, 7, 3, 3, 2],
+  social:     [14, 1, 1, 1, 1],
+  signal:     [35, 5, 3, 1, 1],
+  bot:        [25, 2, 1, 1, 1],
+  mentorship: [20, 5, 2, 1, 1],
+  token:      [5,  1, 1, 0, 0],
 };
 
 const productSchema = new mongoose.Schema(
@@ -19,7 +21,7 @@ const productSchema = new mongoose.Schema(
     description: { type: String, default: '' },
     category: {
       type: String,
-      enum: ['course', 'social', 'signal', 'bot'],
+      enum: ['course', 'social', 'signal', 'bot', 'mentorship', 'token'],
       required: [true, 'Category is required'],
     },
     price: {

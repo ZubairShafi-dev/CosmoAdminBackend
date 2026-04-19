@@ -27,13 +27,19 @@ const settingsSchema = new mongoose.Schema({
   },
 
   // Bot Rank Reward Milestones (Direct sales count -> Reward amount)
-  botRankRewards: [
-    { bots: 6,   reward: 100 },
-    { bots: 15,  reward: 250 },
-    { bots: 26,  reward: 500 },
-    { bots: 50,  reward: 1000 },
-    { bots: 100, reward: 2000 },
-  ],
+  botRankRewards: {
+    type: [{
+      bots: Number,
+      reward: Number
+    }],
+    default: [
+      { bots: 6,   reward: 100 },
+      { bots: 15,  reward: 250 },
+      { bots: 26,  reward: 500 },
+      { bots: 50,  reward: 1000 },
+      { bots: 100, reward: 2000 },
+    ]
+  },
 
   // Sales Bonus for Courses
   courseSalesBonus: {

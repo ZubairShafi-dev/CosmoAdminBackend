@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Settings = require('../models/Settings');
-const { protect, restrictTo } = require('../middlewares/auth');
+const { protect, restrictTo } = require('../middlewares/authMiddleware');
 
 // Get current settings (Public or protected? Admin needs to edit, user needs to view)
 router.get('/', async (req, res) => {

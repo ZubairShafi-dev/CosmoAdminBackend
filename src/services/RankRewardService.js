@@ -1,109 +1,120 @@
 const User = require('../models/User');
 const Order = require('../models/Order');
 const Transaction = require('../models/Transaction');
+const Settings = require('../models/Settings');
+const RewardRequest = require('../models/RewardRequest');
 
 /**
- * MONTHLY RANK REWARD TABLE
- * Based on the number of direct referrals who purchased a bot this month.
- *
- * Tier     | Condition (direct referrals × bot price)     | Reward
- * ---------|----------------------------------------------|---------
- * Starter  | 2 referrals × $50 bot                        | $120
- * Pro      | 2 referrals × $100 bot                       | $300
- * Growth   | 2 referrals × $150 bot                       | $600
- * Elite    | 2 referrals × $200 bot (+ previous tiers)    | $1,200
- * Master   | 2 referrals × $300 bot (+ all tiers)         | $2,000
- *
- * The system sums up the highest qualifying tier per user.
+ * getMonthlyBotSales
+ * Counts unique direct referrals who purchased a bot THIS month.
  */
-const RANK_TIERS = [
-  { name: 'Starter', minBotPrice: 50,  minReferrals: 2, reward: 120  },
-  { name: 'Pro',     minBotPrice: 100, minReferrals: 2, reward: 300  },
-  { name: 'Growth',  minBotPrice: 150, minReferrals: 2, reward: 600  },
-  { name: 'Elite',   minBotPrice: 200, minReferrals: 2, reward: 1200 },
-  { name: 'Master',  minBotPrice: 300, minReferrals: 2, reward: 2000 },
-];
-
-/**
- * runMonthlyRankRewards
- * Scans all users, counts their direct referrals' bot purchases this month,
- * determines the highest qualifying rank, and distributes rewards.
- *
- * Should be triggered by rankRewardCron.js on the 1st of each month.
- */
-const runMonthlyRankRewards = async () => {
-  console.log('🏆 [RankRewardService] Running monthly rank reward distribution...');
-
+const getMonthlyBotSales = async (userId) => {
   const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1); // Previous month
-  const endOfMonth   = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
-  // Get all users who have at least one direct referral
-  const users = await User.find({ isActive: true });
+  const directReferrals = await User.find({ referredBy: userId }).select('_id');
+  const referralIds = directReferrals.map(r => r._id);
 
-  const rewardTransactions = [];
+  if (referralIds.length === 0) return 0;
 
-  for (const user of users) {
-    // Find all direct referrals of this user
-    const directReferrals = await User.find({ referredBy: user._id }).select('_id');
-    const referralIds = directReferrals.map((r) => r._id);
+  const botOrders = await Order.find({
+    buyer: { $in: referralIds },
+    productCategory: 'bot',
+    status: 'completed',
+    createdAt: { $gte: startOfMonth, $lte: endOfMonth }
+  });
 
-    if (referralIds.length === 0) continue;
-
-    // Get all bot orders from direct referrals in the previous month
-    const botOrders = await Order.find({
-      buyer:          { $in: referralIds },
-      productCategory: 'bot',
-      status:         'completed',
-      createdAt:      { $gte: startOfMonth, $lt: endOfMonth },
-    }).populate('product', 'price');
-
-    if (botOrders.length === 0) continue;
-
-    // Determine the highest qualifying rank tier
-    let qualifiedReward = 0;
-    let qualifiedTier   = null;
-
-    for (const tier of RANK_TIERS) {
-      // Count referrals who bought a bot at or above this tier's min price
-      const qualifyingOrders = botOrders.filter(
-        (o) => o.product && o.product.price >= tier.minBotPrice
-      );
-
-      // Group by buyer to count unique referrals at this price level
-      const uniqueBuyers = new Set(qualifyingOrders.map((o) => o.buyer.toString()));
-
-      if (uniqueBuyers.size >= tier.minReferrals) {
-        qualifiedReward = tier.reward; // Keep the highest tier
-        qualifiedTier   = tier.name;
-      }
-    }
-
-    if (qualifiedReward > 0) {
-      // Credit the user's wallet
-      await User.findByIdAndUpdate(user._id, {
-        $inc: { walletBalance: qualifiedReward, totalEarned: qualifiedReward },
-      });
-
-      rewardTransactions.push({
-        user:        user._id,
-        type:        'rank_reward',
-        amount:      qualifiedReward,
-        currency:    'USD',
-        description: `Monthly ${qualifiedTier} rank reward for ${startOfMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}`,
-        status:      'completed',
-      });
-
-      console.log(`  ✅ ${user.name} → ${qualifiedTier} → $${qualifiedReward}`);
-    }
-  }
-
-  if (rewardTransactions.length > 0) {
-    await Transaction.insertMany(rewardTransactions);
-  }
-
-  console.log(`🏆 [RankRewardService] Done. ${rewardTransactions.length} rewards distributed.`);
-  return rewardTransactions.length;
+  // Count unique buyers
+  const uniqueBuyers = new Set(botOrders.map(o => o.buyer.toString()));
+  return uniqueBuyers.size;
 };
 
-module.exports = { runMonthlyRankRewards };
+/**
+ * submitRewardRequest
+ * Validates eligibility (sales + window) and creates a request.
+ */
+const submitRewardRequest = async (userId, milestoneBots) => {
+  const now = new Date();
+  const day = now.getDate();
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+  // "last 5 days of the month"
+  if (day < lastDay - 4) {
+    throw new Error(`Rewards can only be claimed in the last 5 days of the month (starting from day ${lastDay - 4}).`);
+  }
+
+  const settings = await Settings.getSettings();
+  const milestone = settings.botRankRewards.find(r => r.bots === milestoneBots);
+  
+  if (!milestone) {
+    throw new Error('Invalid reward milestone.');
+  }
+
+  const currentSales = await getMonthlyBotSales(userId);
+  if (currentSales < milestoneBots) {
+    throw new Error(`Requirement not met. You need ${milestoneBots} direct bot sales, but you have ${currentSales}.`);
+  }
+
+  // Check if already requested/received this month
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  const existing = await RewardRequest.findOne({
+    user: userId,
+    milestoneBots,
+    month,
+    year
+  });
+
+  if (existing) {
+    throw new Error('You have already submitted a request for this milestone this month.');
+  }
+
+  const request = await RewardRequest.create({
+    user: userId,
+    milestoneBots,
+    rewardAmount: milestone.reward,
+    month,
+    year,
+    status: 'pending'
+  });
+
+  return request;
+};
+
+/**
+ * approveRewardRequest
+ * Admin action to credit user and mark as approved.
+ */
+const approveRewardRequest = async (requestId, adminNote = '') => {
+  const request = await RewardRequest.findById(requestId);
+  if (!request) throw new Error('Request not found');
+  if (request.status !== 'pending') throw new Error('Request is already processed');
+
+  const user = await User.findById(request.user);
+  if (!user) throw new Error('User not found');
+
+  // Update status
+  request.status = 'approved';
+  request.adminNote = adminNote;
+  await request.save();
+
+  // Credit wallet
+  await User.findByIdAndUpdate(user._id, {
+    $inc: { walletBalance: request.rewardAmount, totalEarned: request.rewardAmount }
+  });
+
+  // Create transaction record
+  await Transaction.create({
+    user: user._id,
+    type: 'rank_reward',
+    amount: request.rewardAmount,
+    currency: 'USD',
+    description: `Bot Rank Reward (${request.milestoneBots} bots) - Approved`,
+    status: 'completed'
+  });
+
+  return request;
+};
+
+module.exports = { getMonthlyBotSales, submitRewardRequest, approveRewardRequest };

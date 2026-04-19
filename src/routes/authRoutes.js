@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { body } = require('express-validator');
-const { register, login, getMe, updateMe } = require('../controllers/authController');
+const { register, login, getMe, updateMe, syncVerification } = require('../controllers/authController');
 const { protect } = require('../middlewares/authMiddleware');
 
 // Validation rules
@@ -17,6 +17,7 @@ const loginRules = [
 ];
 
 router.post('/register', registerRules, register);
+router.post('/sync-verification', syncVerification);
 router.post('/login',    loginRules,    login);
 router.get('/me',        protect,       getMe);
 router.put('/me',        protect,       updateMe);

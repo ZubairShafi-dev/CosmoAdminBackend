@@ -39,6 +39,17 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    // ─── Affiliate & VIP Status ────────────────────────────────
+    vipLevel: {
+      type: Number,
+      enum: [0, 1, 2, 3], // 0: Standard, 1: VIP1, etc.
+      default: 0,
+    },
+    bundleBuyersCount: {
+      type: Number,
+      default: 0, // Number of direct members who bought a full bundle
+    },
+
     // ─── Eligibility Flags (for L2-L5 commission unlocking) ───
     hasPurchasedCourse: { type: Boolean, default: false },
     hasActiveSignalSub: { type: Boolean, default: false },  // sub >= $25
@@ -54,6 +65,8 @@ const userSchema = new mongoose.Schema(
     avatar:  { type: String, default: '' },
 
     isActive: { type: Boolean, default: true },
+    isVerified: { type: Boolean, default: false },
+    firebaseUid: { type: String, unique: true, sparse: true },
   },
   { timestamps: true }
 );

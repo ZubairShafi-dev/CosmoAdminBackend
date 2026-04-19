@@ -1,29 +1,16 @@
 const User = require('../models/User');
 const Product = require('../models/Product');
 const Transaction = require('../models/Transaction');
+const Settings = require('../models/Settings');
+const Order = require('../models/Order');
 
 /**
- * COMMISSION RATES per category per level (L1 → L5)
- *  course:  [30, 7, 3, 3, 2]
- *  social:  [14, 1, 1, 1, 1]
- *  signal:  [35, 5, 3, 1, 1]
- *  bot:     [25, 2, 1, 1, 1]
- *
  * ELIGIBILITY for L2-L5:
  *  course  → parent must have hasPurchasedCourse === true
  *  social  → no condition (always pays)
  *  signal  → parent must have hasActiveSignalSub === true
  *  bot     → parent must have hasPurchasedBot === true
  */
-
-const COMMISSION_RATES = {
-  course: [30, 7, 3, 3, 2],
-  social: [14, 1, 1, 1, 1],
-  signal: [35, 5, 3, 1, 1],
-  bot:    [25, 2, 1, 1, 1],
-};
-
-// ─── Check if a user is eligible for L2-L5 of a given category ──
 const isEligibleForLevel = (user, category, level) => {
   if (level === 1) return true; // L1 always pays
 
@@ -39,24 +26,30 @@ const isEligibleForLevel = (user, category, level) => {
 /**
  * distributeCommissions
  * Called after an order is marked "completed".
- *
- * @param {Object} order   - Populated Order document
- * @param {Object} product - Populated Product document
- * @param {Object} buyer   - User who placed the order
  */
 const distributeCommissions = async (order, product, buyer) => {
+  const settings = await Settings.getSettings();
   const category = product.category;
-  const rates = COMMISSION_RATES[category] || [0, 0, 0, 0, 0];
+  const baseRates = settings.commissions[category] || [0, 0, 0, 0, 0];
   const transactions = [];
 
-  let currentUserId = buyer.referredBy; // Start from the direct referrer (L1)
+  let currentUserId = buyer.referredBy; 
   let level = 1;
 
   while (currentUserId && level <= 5) {
     const affiliate = await User.findById(currentUserId);
     if (!affiliate) break;
 
-    const rate = rates[level - 1]; // e.g. level 1 → index 0
+    let rate = baseRates[level - 1];
+
+    // ─── VIP Logic for Level 1 ───
+    if (level === 1) {
+      const vipIncome = settings.vipDirectIncome;
+      if (affiliate.vipLevel === 1) rate = vipIncome.vip1;
+      else if (affiliate.vipLevel === 2) rate = vipIncome.vip2;
+      else if (affiliate.vipLevel === 3) rate = vipIncome.vip3;
+      else rate = vipIncome.standard;
+    }
 
     if (rate > 0 && isEligibleForLevel(affiliate, category, level)) {
       const commissionAmount = parseFloat(((order.amount * rate) / 100).toFixed(2));
@@ -94,17 +87,39 @@ const distributeCommissions = async (order, product, buyer) => {
 
 /**
  * updateBuyerEligibilityFlags
- * After a purchase, update the buyer's eligibility flags so their
- * upline can earn L2-L5 on future sales.
- *
- * @param {Object} buyer   - User document
- * @param {Object} product - Product document
- * @param {Number} amount  - Purchase amount
+ * Includes "Full Bundle" detection and auto-VIP upgrade for referrer.
  */
 const updateBuyerEligibilityFlags = async (buyer, product, amount) => {
+  const settings = await Settings.getSettings();
   const updates = {};
+  let newlyCompletedBundle = false;
 
-  if (product.category === 'course')  updates.hasPurchasedCourse = true;
+  if (product.category === 'course') {
+    updates.hasPurchasedCourse = true;
+    
+    // Check if this purchase completes a "Full Bundle" for the buyer
+    // A bundle = all courses in the same sub-category or specific flag
+    // For now, we'll check if buyer owns all courses in this category
+    const allCoursesInCategory = await Product.find({ category: 'course', isActive: true });
+    
+    // Get all completed orders for this user for courses
+    const userCourseOrders = await Order.find({ 
+      buyer: buyer._id, 
+      productCategory: 'course', 
+      status: 'completed' 
+    }).populate('product');
+
+    const ownedProductIds = new Set(userCourseOrders.map(o => o.product?._id.toString()));
+    ownedProductIds.add(product._id.toString()); // include current
+
+    const categoryProducts = allCoursesInCategory.map(p => p._id.toString());
+    const hasAll = categoryProducts.every(id => ownedProductIds.has(id));
+
+    if (hasAll) {
+      newlyCompletedBundle = true;
+    }
+  }
+
   if (product.category === 'bot')     updates.hasPurchasedBot = true;
   if (product.category === 'signal' && amount >= (product.minSubAmountForLevels || 25)) {
     updates.hasActiveSignalSub = true;
@@ -112,6 +127,24 @@ const updateBuyerEligibilityFlags = async (buyer, product, amount) => {
 
   if (Object.keys(updates).length > 0) {
     await User.findByIdAndUpdate(buyer._id, updates);
+  }
+
+  // If a bundle was completed, increment referrer's count and check for VIP upgrade
+  if (newlyCompletedBundle && buyer.referredBy) {
+    const referrer = await User.findById(buyer.referredBy);
+    if (referrer) {
+      const newCount = (referrer.bundleBuyersCount || 0) + 1;
+      let newVipLevel = referrer.vipLevel;
+
+      if (newCount >= settings.vipCriteria.vip3) newVipLevel = 3;
+      else if (newCount >= settings.vipCriteria.vip2) newVipLevel = 2;
+      else if (newCount >= settings.vipCriteria.vip1) newVipLevel = 1;
+
+      await User.findByIdAndUpdate(referrer._id, {
+        bundleBuyersCount: newCount,
+        vipLevel: newVipLevel
+      });
+    }
   }
 };
 

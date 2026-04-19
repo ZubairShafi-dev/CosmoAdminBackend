@@ -38,8 +38,29 @@ exports.register = async (req, res) => {
       if (referrer) referredBy = referrer._id;
     }
 
-    const user = await User.create({ name, email, password, referredBy });
-    sendAuthResponse(user, 201, res);
+    const user = await User.create({ name, email, password, referredBy, firebaseUid: req.body.firebaseUid });
+    
+    // If we're using Firebase for initial verification, we don't send auth response yet
+    // because use must verify email first.
+    res.status(201).json({ success: true, message: 'User registered. Please verify email.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── POST /api/auth/sync-verification ─────────────────────────
+exports.syncVerification = async (req, res) => {
+  try {
+    const { firebaseUid } = req.body;
+    const user = await User.findOneAndUpdate(
+      { firebaseUid },
+      { isVerified: true },
+      { new: true }
+    );
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    res.json({ success: true, message: 'Account verified successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -58,6 +79,10 @@ exports.login = async (req, res) => {
     const user = await User.findOne({ email }).select('+password');
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
+    }
+
+    if (!user.isVerified) {
+      return res.status(403).json({ success: false, message: 'Please verify your email address before logging in.' });
     }
 
     sendAuthResponse(user, 200, res);

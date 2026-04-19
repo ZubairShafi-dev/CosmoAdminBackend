@@ -26,6 +26,8 @@ app.use('/api/products',  productRoutes);
 app.use('/api/orders',    orderRoutes);
 app.use('/api/wallet',    walletRoutes);
 app.use('/api/affiliate', affiliateRoutes);
+app.use('/api/settings',  require('./routes/settingsRoutes'));
+app.use('/api/rewards',   require('./routes/rewardRoutes'));
 app.use('/api/admin',     adminRoutes);
 
 // ─── 404 Handler ──────────────────────────────────────────────
